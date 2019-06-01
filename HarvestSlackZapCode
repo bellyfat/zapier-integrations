@@ -1,0 +1,173 @@
+# Python - Create Slack channel for Harvest create new project trigger
+import requests
+import json
+import urllib.request
+
+# Slack API configurations
+slack_base_URL = "https://slack.com/api"
+slack_token = "****"
+slack_headers = {
+    'Content-Type': 'application/json;charset=iso-8859-1',
+    'Authorization': 'Bearer '+slack_token
+    }
+slack_channel_default_user_emails = [
+    "sample@example.com"
+]
+slack_filter_user_list_count = "200"
+slack_channel_name = str(input_data['code'])+'_'+str(input_data['name'])
+slack_channel_name = slack_channel_name.strip()
+slack_channel_name = slack_channel_name[:20]
+slack_channel_name = slack_channel_name.replace(" ", "_")
+slack_channel_name = slack_channel_name.replace("-", "")
+slack_channel_name = slack_channel_name.lower()
+slack_channel_ID = "0"  # default
+slack_channel_member_IDs = []
+
+# Hrvest API configurations
+harvest_base_URL = "https://api.harvestapp.com/v2"
+harvest_token = "****"
+harvest_account_ID = "****"
+harvest_headers = {
+    'User-Agent': 'Python Harvest API',
+    'Authorization': 'Bearer ' + harvest_token,
+    'Harvest-Account-ID': harvest_account_ID
+}
+harvest_project_ID = str(input_data['id'])
+harvest_user_emails = []
+
+
+# Create Slack channel
+def create_slack_channel():
+
+    slack_URL = slack_base_URL+"/channels.create"
+    slack_jsonData = {
+            'name': slack_channel_name
+            }
+    slack_channel_response = \
+        requests.post(slack_URL, json=slack_jsonData, headers=slack_headers)
+    # print(json.dumps(json.loads(slack_channel_response.text),
+    # sort_keys=True, indent=4, separators=(",", ": ")))
+    slack_channel_json_response = json.loads(slack_channel_response.text)
+    slack_channel_json_response_status = slack_channel_json_response["ok"]
+    if slack_channel_json_response_status:
+        slack_channel_ID = slack_channel_json_response["channel"]["id"]
+        # print("channel ID "+\
+        # str(slack_channel_json_response["channel"]["id"]))
+
+        # Update the channel purpose description
+        slack_channel_purpose = str(input_data['name'])
+        slack_URL = slack_base_URL+"/channels.setPurpose"
+        slack_jsonData = {
+                'channel': slack_channel_ID,
+                'purpose': slack_channel_purpose
+                }
+        slack_channel_purpose_response =\
+            requests.post(slack_URL, json=slack_jsonData, headers=slack_headers)
+        # print(json.dumps(json.loads(slack_channel_purpose_response.text),
+        # sort_keys=True, indent=4, separators=(",", ": ")))
+        return slack_channel_ID
+    else:
+        print(slack_channel_json_response)
+
+
+# Assign Users to channel
+# Get assigned Harvest project manager's emails
+def get_harvest_user_emails():
+
+    # Harvest API - List all assigned project managers of project ID
+    harvest_URL = \
+        harvest_base_URL+"/projects/"+harvest_project_ID+"/user_assignments"
+
+    harvest_request = \
+        urllib.request.Request(url=harvest_URL, headers=harvest_headers)
+    harvest_response = urllib.request.urlopen(harvest_request, timeout=5)
+    harvest_response_body = harvest_response.read().decode("utf-8")
+    harvest_json_response = json.loads(harvest_response_body)
+    # print(json.dumps(harvest_json_response,\
+    # sort_keys=True, indent=4, separators=(",", ": ")))
+
+    user_assignments = harvest_json_response["user_assignments"]
+    harvest_user_IDs = []
+    for user_details in user_assignments:
+        # print(user_details["user"]["id"])
+        harvest_user_IDs.append(user_details["user"]["id"])
+
+    # Harvest API - Get the project manager's email address by user ID
+    for harvest_user_id in harvest_user_IDs:
+        # print(harvest_user_id)
+        harvest_URL = harvest_base_URL+"/users/"+str(harvest_user_id)
+
+        harvest_request = \
+            urllib.request.Request(url=harvest_URL, headers=harvest_headers)
+        harvest_response = urllib.request.urlopen(harvest_request, timeout=5)
+        harvest_response_body = harvest_response.read().decode("utf-8")
+        harvest_json_response = json.loads(harvest_response_body)
+
+        # print(json.dumps(harvest_json_response,\
+        # sort_keys=True, indent=4, separators=(",", ": ")))
+        if harvest_json_response["is_project_manager"]:
+            harvest_user_email = harvest_json_response["email"]
+            # print(harvest_user_email)
+            harvest_user_emails.append(harvest_user_email)
+    return harvest_user_emails
+
+
+# Slack API - Get Slack user ID by mapping the Harvest emails
+def get_slack_user_ids(harvest_user_emails):
+
+    slack_URL = slack_base_URL+"/users.list"
+    slack_jsonData = {
+            'limit': slack_filter_user_list_count
+            }
+    slack_response = \
+        requests.post(slack_URL, json=slack_jsonData, headers=slack_headers)
+    # print(json.dumps(json.loads(slack_response.text),\
+    # sort_keys=True, indent=4, separators=(",", ": ")))
+    slack_channel_emails = \
+        harvest_user_emails + slack_channel_default_user_emails
+    slack_json_response = json.loads(slack_response.text)
+    # print(slack_json_response)
+    slack_members = slack_json_response["members"]
+    for slack_profile in slack_members:
+        slack_user_ID = slack_profile["id"]
+        # print(slack_user_ID)
+        # print(slack_profile["profile"].get("email"))
+        slack_channel_member_email = slack_profile["profile"].get("email")
+        if slack_channel_member_email != "None":
+            # Map with the Harvest Emails
+            for harvest_user_email in slack_channel_emails:
+                if harvest_user_email == slack_channel_member_email:
+                    slack_channel_member_IDs.append(slack_user_ID)
+
+    return slack_channel_member_IDs
+
+
+# Slack API - Assigned Slack users to the created channel
+def set_slack_user_ids_to_channel(slack_channel_member_IDs):
+
+    slack_URL = slack_base_URL+"/channels.invite"
+    for slack_member_ID in slack_channel_member_IDs:
+        # print(slack_member_ID)
+        slack_jsonData = {
+                'channel': slack_channel_ID,
+                'user': slack_member_ID
+                }
+        slack_response = \
+            requests.post(
+                slack_URL,
+                json=slack_jsonData,
+                headers=slack_headers
+                )
+        slack_response_json_load = json.loads(slack_response.text)
+        slack_response_json_dump = json.dumps(
+            slack_response_json_load,
+            sort_keys=True, indent=4, separators=(",", ": ")
+            )
+        # print(slack_response_json_dump)
+        output = [{'response': print(slack_response_json_dump)}]
+
+
+slack_channel_ID = create_slack_channel()
+harvest_user_emails = get_harvest_user_emails()
+slack_channel_member_IDs = get_slack_user_ids(harvest_user_emails)
+set_slack_user_ids_to_channel(slack_channel_member_IDs)
