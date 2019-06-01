@@ -1,0 +1,762 @@
+'''
+# Template: JIRA, Confluence, Harvest, Slack, Float API Integration
+# Version: 1.6
+# Objective: Get all the JIRA client contacts data
+# Objective: Create or update Confluence article Client page with their Contacts 
+'''
+# ================================
+# API Integration Framework
+# ================================
+import json
+import datetime
+import requests
+from requests.auth import HTTPBasicAuth
+
+# ================================
+# API Configurations
+# ================================
+
+# JIRA Configurations
+JIRA_EMAIL = "****"
+JIRA_TOKEN = "****"
+BASE_URL = "https://****.atlassian.net"
+BASIC_AUTH = HTTPBasicAuth(JIRA_EMAIL, JIRA_TOKEN)
+JIRA_HEADERS = {'Content-Type' : 'application/json;charset=iso-8859-1'}
+
+JIRA_TASK_ID = input_data['issue_key']
+
+# Confluence Configurations
+CONFLUENCE_EMAIL = "****"
+CONFLUENCE_TOKEN = "****"
+CONFLUENCE_BASE_URL = "https://****.atlassian.net"
+CONFLUENCE_BASIC_AUTH = HTTPBasicAuth(CONFLUENCE_EMAIL, CONFLUENCE_TOKEN)
+CONFLUENCE_HEADERS = {'Content-Type' : 'application/json;charset=iso-8859-1'}
+CONFLUENCE_PAGE_SPACE_KEY = 'NOV'
+
+# Harvest Configurations
+HARVEST_ACCOUNT_ID = "****"
+HARVEST_BASE_URL = "https://api.harvestapp.com/v2"
+HARVEST_TOKEN = "****"
+HARVEST_HEADERS = {
+    "User-Agent": "Python Harvest API Integration",
+    "Authorization": "Bearer " + HARVEST_TOKEN,
+    "Harvest-Account-ID": HARVEST_ACCOUNT_ID,
+    "Content-Type": "application/json"
+}
+# default page = 1 contains 100 records
+HARVEST_CLIENT_PAGES = 5
+HARVEST_PROJECT_PAGES = 10
+HARVEST_PROJECT_CODES = []
+HARVEST_INCREMENT_NUMBERS = []
+HARVEST_FORMATTED_PROJECT_CODES = []
+
+# Slack API configurations
+SLACK_BASE_URL = "https://slack.com/api"
+SLACK_TOKEN = "****"
+SLACK_HEADERS = {
+    'Content-Type': 'application/json;charset=iso-8859-1',
+    'Authorization': 'Bearer '+SLACK_TOKEN
+    }
+SLACK_CHANNEL_DEFAULT_EMAILS = [
+    "****"
+]
+SLACK_FILTER_USER_COUNT = "200"
+
+# Float API Configurations
+FLOAT_BASE_URL = "https://api.float.com/v3"
+FLOAT_TOKEN = "****"
+FLOAT_HEADERS = {
+    "User-Agent": "Python Float API Integration",
+    "Authorization": "Bearer " + FLOAT_TOKEN,
+    "Content-Type": "application/json"
+}
+
+# ================================
+# Code Templates
+# ================================
+
+class JIRA(object):
+# JIRA Class
+
+    def search_issue(self, json_payload):
+        # Search JIRA issues by JQL
+        '''
+        # Payload sample
+        JQL_DATA = json.dumps({
+        "expand": [
+            "names",
+            "schema",
+            "operations"
+        ],
+        "jql": "issuetype = Client AND status != Closed",
+        "maxResults": 100,
+        "fieldsByKeys": "false",
+        "fields": [
+            "*all"
+        ],
+        "startAt": 0
+        })
+        '''
+        api_url = "/rest/api/3/search"
+        api_url = BASE_URL+api_url
+        request_response = requests.post(
+            url=api_url,
+            data=json_payload,
+            headers=JIRA_HEADERS,
+            auth=BASIC_AUTH
+            )
+        # print(request_response)
+        # print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        return request_response
+
+    def get_issue_details(self, jira_issue_id):
+        # Get JIRA issue details by issue key
+        api_url = "/rest/api/3/issue/"+str(jira_issue_id)
+        api_url = BASE_URL+api_url
+        request_response = requests.get(
+            url=api_url,
+            headers=JIRA_HEADERS,
+            auth=BASIC_AUTH
+            )
+        # print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(request_response.text)
+        return json_response
+
+    def update_issue_details(self, jira_issue_id, json_payload):
+        # Update JIRA issue details by issue key
+        '''
+        # Payload sample
+        """{ "fields": {"summary": "new summary"} }"""
+        '''
+        api_url = "/rest/api/2/issue/"+str(jira_issue_id)
+        api_url = BASE_URL+api_url
+        request_response = requests.put(
+            url=api_url,
+            data=json_payload,
+            headers=JIRA_HEADERS,
+            auth=BASIC_AUTH
+            )
+        # print(request_response)
+        # print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        return request_response
+
+    def filter_client_contact_details(self, json_response):
+        # Get JIRA Client and their Contacts details
+        jira_client = json.loads(json_response.text)
+
+        client_contact_data = []
+        # Filter JIRA Client type data
+        for issue in jira_client['issues']:
+            client_summary = issue['fields']['summary']
+            client_issue_key = issue['key']
+            client_status = issue['fields']['status']['name']
+            client_issue_type = issue['fields']['issuetype']['name']
+            if issue['fields']['description']:
+                if 'content' in issue['fields']['description']['content'][0]:
+                    client_description = issue['fields']['description']['content'][0]['content'][0]['text']
+                else:
+                    client_description = 'N/A'
+            else:
+                client_description = 'N/A'
+            # Get Contact issue IDs
+            contacts_ids = []
+            for contact_link in issue['fields']['issuelinks']:
+                if 'outwardIssue' in contact_link:
+                    contact_link_ID = contact_link['outwardIssue']['key']
+                    if 'fields' in contact_link['outwardIssue']:
+                        outward_contact_type = contact_link['outwardIssue']['fields']['issuetype']['name']
+                        if outward_contact_type.lower() == 'contact':
+                            contacts_ids.append(contact_link_ID)
+                if 'inwardIssue' in contact_link:
+                    contact_link_ID = contact_link['inwardIssue']['key']
+                    if 'fields' in contact_link['inwardIssue']:
+                        inward_contact_type = contact_link['inwardIssue']['fields']['issuetype']['name']
+                        if inward_contact_type.lower() == 'contact':
+                            contacts_ids.append(contact_link_ID)
+            # Get Contact data
+            contacts_data = []
+            for contact_id in contacts_ids:
+                contact_json_data = self.get_issue_details(contact_id)
+                contact_summary = contact_json_data['fields']['summary']
+                contact_issue_key = contact_json_data['key']
+                contact_status = contact_json_data['fields']['status']['name']
+                contact_issue_type = contact_json_data['fields']['issuetype']['name']
+                contact_creator_name = contact_json_data['fields']['creator']['displayName']
+                contact_creator_email = contact_json_data['fields']['creator']['emailAddress']
+                contact_assignee_name = contact_json_data['fields']['assignee']['displayName']
+                contact_assignee_email = contact_json_data['fields']['assignee']['emailAddress']
+                contact_title = contact_json_data['fields']['customfield_10931']
+                contact_linkedin = contact_json_data['fields']['customfield_10932']
+                contact_telephone = contact_json_data['fields']['customfield_10933']
+                contact_email = contact_json_data['fields']['customfield_10934']
+                if contact_json_data['fields']['customfield_10935']:
+                    if 'value' in contact_json_data['fields']['customfield_10935'][0]:
+                        contact_type = contact_json_data['fields']['customfield_10935'][0]['value']
+                    else:
+                        contact_type = 'N/A'
+                else:
+                    contact_type = 'N/A'
+                if 'child' in contact_json_data['fields']['customfield_10936']:
+                    contact_location = contact_json_data['fields']['customfield_10936']['value']+' - '+contact_json_data['fields']['customfield_10936']['child']['value']
+                else:
+                    contact_location = 'N/A'
+                if contact_json_data['fields']['customfield_10945']:
+                    contact_health = contact_json_data['fields']['customfield_10945']['value']
+                else:
+                    contact_health = 'N/A'
+                if contact_json_data['fields']['description']:
+                    if 'content' in contact_json_data['fields']['description']['content'][0]:
+                        contact_description = contact_json_data['fields']['description']['content'][0]['content'][0]['text']
+                    else:
+                        contact_description = 'N/A'
+                else:
+                    contact_description = 'N/A'
+                contacts_data.append({
+                    'contact_summary':contact_summary, 'contact_issue_key':contact_issue_key,
+                    'contact_status':contact_status, 'contact_issue_type':contact_issue_type,
+                    'contact_creator_name':contact_creator_name, 'contact_creator_email':contact_creator_email,
+                    'contact_assignee_name':contact_assignee_name, 'contact_assignee_email':contact_assignee_email,
+                    'contact_title':contact_title, 'contact_linkedin':contact_linkedin,
+                    'contact_telephone':contact_telephone, 'contact_email':contact_email,
+                    'contact_type':contact_type, 'contact_location':contact_location,
+                    'contact_health':contact_health, 'contact_description':contact_description,
+                })
+            client_contact_data.append({
+                'client_name':client_summary,
+                'client_issue_key':client_issue_key,
+                'client_status':client_status,
+                'client_issue_type':client_issue_type,
+                'client_description':client_description,
+                'contact_data':contacts_data
+            })
+        return client_contact_data
+
+    def filter_issue_type_client(self, json_response):
+        # Get the JIRA client type task related to SoW issue
+        if json_response['fields']['issuelinks'] is None:
+            print('Issue does not contains any issue links!')
+        else:
+            for issue in json_response['fields']['issuelinks']:
+                if 'inwardIssue' in issue:
+                    issue_type = issue['inwardIssue']['fields']['issuetype']['name']
+                    if issue_type == 'Client':
+                        issue_key = issue['inwardIssue']['key']
+                        # print('Client type issue Key : '+str(issue_key))
+                if 'outwardIssue' in issue:
+                    issue_type = issue['outwardIssue']['fields']['issuetype']['name']
+                    if issue_type == 'Client':
+                        issue_key = issue['outwardIssue']['key']
+                        # print('Client type issue Key : '+str(issue_key))
+                return issue_key
+                
+
+class Confluence(object):
+# Confluence Class
+
+    def create_page(self, json_payload):
+        # Create a Confluence article page
+        '''
+        # Payload sample
+        """{"type":"page","title":"new page","space":{"key":"TST"},"body":{"storage":{"value":"<p>This is a new page</p>","representation":"storage"}}}"""
+        '''
+        api_url = "/wiki/rest/api/content/"
+        api_url = CONFLUENCE_BASE_URL+api_url
+        request_response = requests.post(
+            url=api_url,
+            data=json_payload,
+            headers=CONFLUENCE_HEADERS,
+            auth=CONFLUENCE_BASIC_AUTH
+            )
+        # print(request_response)
+        # print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(request_response.text)
+        return json_response
+
+    def update_page(self, json_payload):
+        # Create a Confluence article page
+        '''
+        # Payload sample
+        """{"id":"3604482","type":"page","title":"new page","space":{"key":"TST"},"body":{"storage":{"value":"<p>This is the updated text for the new page</p>","representation":"storage"}},"version":{"number":2}}"""
+        '''
+        api_url = "/wiki/rest/api/content/"
+        api_url = CONFLUENCE_BASE_URL+api_url
+        request_response = requests.put(
+            url=api_url,
+            data=json_payload,
+            headers=CONFLUENCE_HEADERS,
+            auth=CONFLUENCE_BASIC_AUTH
+            )
+        # print(request_response)
+        # print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(request_response.text)
+        return json_response
+
+    def delete_page(self, page_id):
+        # Create a Confluence article page
+        '''
+        # Payload sample
+        "DELETE https://your-domain.atlassian.net/wiki/rest/api/content/3604482"
+        '''
+        api_url = "/wiki/rest/api/content/"+str(page_id)
+        api_url = CONFLUENCE_BASE_URL+api_url
+        request_response = requests.delete(
+            url=api_url,
+            headers=CONFLUENCE_HEADERS,
+            auth=CONFLUENCE_BASIC_AUTH
+            )
+        print(request_response)
+        # print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        return request_response
+
+    def find_page(self, title, space_key):
+        # Create a Confluence article page
+        '''
+        # Payload sample
+        "https://your-domain.atlassian.net/wiki/rest/api/content?title=myPage%20Title&spaceKey=TST&expand=history"
+        '''
+        api_url = "/wiki/rest/api/content"
+        api_url = CONFLUENCE_BASE_URL+api_url
+        get_params = "?title=%s&spaceKey=%s&expand=history" % (title, space_key)
+        api_url = api_url+get_params
+        request_response = requests.get(
+            url=api_url,
+            headers=CONFLUENCE_HEADERS,
+            auth=CONFLUENCE_BASIC_AUTH
+            )
+        # print(request_response)
+        # print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(request_response.text)
+        return json_response
+
+    def create_client_contact_page(self, page_data, page_space_key):
+        # Create Confluence Client Contact page
+        for page in page_data:
+            page_title = page['client_issue_key']+' - '+page['client_name']
+            print('filtered page_title : '+str(page_title))
+            page_body = "<h3>Client Status : <b>"+page['client_status']+"</b></h3><h3><u>Client Description</u></h3><p>"+page['client_description']+"</p>"
+            # Add Client data
+            page_content = """{"type":"page","title":"%s","space":{"key":"%s"},"body":{"storage":{"value":"%s","representation":"storage"}}}""" % (page_title, page_space_key, page_body)
+            json_response = self.create_page(page_content)
+            print('create page client response : '+str(json_response))
+
+            if 'statusCode' in json_response:
+                if json_response['statusCode'] == 400:
+                    # get page id
+                    result_json = self.find_page(page_title, page_space_key)
+                    page_id = result_json['results'][0]['id']
+                    print('page_title : '+str(page_title))
+                    print('page_id : '+str(page_id))
+                    # page is already exists and require to update
+                    json_delete_response = self.delete_page(page_id)
+                    json_recreate_response = self.create_page(page_content)
+
+            # Add Client Contact data
+            if page['contact_data']:
+                page_body = page_body+"<h3><u>Contact Details</u></h3><table><tbody><tr><th>Contact JIRA Key</th><th>Name</th><th>Title</th><th>Contact Status</th><th>Contact Health</th><th>Contact Type</th><th>Email</th><th>Location</th><th>Telephone</th><th>Linkedin</th><th>Description</th><th>Contact Creator Name</th><th>Contact Creator Email</th><th>Contact Assignee Name</th><th>Contact Assignee Email</th></tr>"
+                for contact in page['contact_data']:
+                    page_body = page_body+"<tr><td>"+contact['contact_issue_key']+"</td><td>"+contact['contact_summary']+"</td><td>"+contact['contact_title']+"</td><td>"+contact['contact_status']+"</td><td>"+contact['contact_health']+"</td><td>"+contact['contact_type']+"</td><td>"+contact['contact_location']+"</td><td>"+contact['contact_email']+"</td><td>"+contact['contact_telephone']+"</td><td>"+contact['contact_linkedin']+"</td><td>"+contact['contact_description']+"</td><td>"+contact['contact_creator_email']+"</td><td>"+contact['contact_creator_name']+"</td><td>"+contact['contact_assignee_email']+"</td><td>"+contact['contact_assignee_name']+"</td></tr></tbody></table>"
+            
+                page_content = """{"type":"page","title":"%s","space":{"key":"%s"},"body":{"storage":{"value":"%s","representation":"storage"}}}""" % (page_title, page_space_key, page_body)
+                json_response = self.create_page(page_content)
+                print('create page contact response : '+str(json_response))
+                
+                if 'statusCode' in json_response:
+                    if json_response['statusCode'] == 400:
+                        # get page id
+                        result_json = self.find_page(page_title, page_space_key)
+                        page_id = result_json['results'][0]['id']
+                        print('page_title : '+str(page_title))
+                        print('page_id : '+str(page_id))
+                        # page is already exists and require to update
+                        json_delete_response = self.delete_page(page_id)
+                        json_recreate_response = self.create_page(page_content)
+
+class Harvest(object):
+# Harvest Class
+
+    def get_client_list(self, page_no):
+        harvest_api_url = HARVEST_BASE_URL + "/clients?page="+str(page_no)
+        response = requests.get(
+            url=harvest_api_url,
+            headers=HARVEST_HEADERS
+            )
+        # print(json.dumps(json.loads(response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(response.text)
+        return json_response
+
+    def get_project_list(self, page_no):
+        # Get Harvest project list
+        harvest_api_url = HARVEST_BASE_URL + "/projects?page="+str(page_no)
+        response = requests.get(
+            url=harvest_api_url,
+            headers=HARVEST_HEADERS
+            )
+        # print(json.dumps(json.loads(response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(response.text)
+        return json_response
+
+    def get_client_id(self, client_name):
+        # Get Harvest client list
+        for pageno in range(HARVEST_CLIENT_PAGES):
+            pageno += 1
+            json_response = self.get_client_list(pageno)
+
+            # Filter the Harvest Project ID
+            harvest_client_id = 0
+            if client_name is None:
+                print('Client name is not defined!')
+            else:
+                for client in json_response['clients']:
+                    if client_name == client['name']:
+                        harvest_client_id = client['id']
+                        # print(harvest_client_id)
+                        return harvest_client_id
+
+    def get_latest_project_code(self, project_key, client_name):
+        # Get latest Harvest project increment code
+
+        if client_name is None or project_key is None:
+            print('Client Name or Project Key is not defined!')
+        else:
+            for pageno in range(HARVEST_PROJECT_PAGES):
+                pageno += 1
+                json_response = self.get_project_list(pageno)
+
+                # Filter the Harvest Project Codes related to Client Name
+                for project in json_response['projects']:
+                    project_code = project['code']
+                    project_client_name = project['client']['name']
+                    if client_name == project_client_name:
+                        print('client_name : '+str(client_name))
+                        print('project_client_name : '+str(project_client_name))
+                        print('project_code : '+str(project_code))
+                        filtered_project_key = str(project_code)[:-5]
+                        print('filtered_project_key : '+str(filtered_project_key))
+                        print('project_key : '+str(project_key))
+                        if project_key == filtered_project_key:
+                            HARVEST_PROJECT_CODES.append(project_code)
+
+            # Generate the new increment number
+            if len(HARVEST_PROJECT_CODES) != 0:
+                for harvest_code in HARVEST_PROJECT_CODES:
+                    increment_number = str(harvest_code)[-3:]
+                    print('increment_number : '+str(increment_number))
+                    HARVEST_INCREMENT_NUMBERS.append(increment_number)
+
+                    print(HARVEST_INCREMENT_NUMBERS)
+                    HARVEST_INCREMENT_NUMBERS.sort(reverse=True)
+                    generated_increment_number = int(HARVEST_INCREMENT_NUMBERS[0]) + 1
+                    print(generated_increment_number)
+                    return generated_increment_number
+            else:
+                print('Not found any matched project key '+str(filtered_project_key)+' with Client task project key '+str(project_key))
+                return 1
+
+    def generate_harvest_code(self, project_key, client_name):
+        # Generate new Harvest Project code
+        current_date = datetime.datetime.now()
+        current_year = current_date.year
+        formatted_year = str(current_year)[-2:]
+        print('formatted_year : '+str(formatted_year))
+        increment_number = self.get_latest_project_code(project_key, client_name)
+        print('generated increment_number : '+str(increment_number))
+        previous_increment_number = increment_number - 1
+        print('formatted increment number : ')
+        increment_number = '{:03}'.format(increment_number)
+        previous_increment_number = '{:03}'.format(previous_increment_number)
+        old_harvest_code = str(project_key)+str(formatted_year)+str(previous_increment_number)
+        new_harvest_code = str(project_key)+str(formatted_year)+str(increment_number)
+        print('old harvest code : '+str(old_harvest_code))
+        print('new harvest code : '+str(new_harvest_code))
+        HARVEST_FORMATTED_PROJECT_CODES.append(old_harvest_code)
+        HARVEST_FORMATTED_PROJECT_CODES.append(new_harvest_code)
+        return HARVEST_FORMATTED_PROJECT_CODES
+
+    def update_project_details(self, project_id, project_data):
+        # Update Harvest Project details
+        # project_data sample data
+        # {"name":"New project name"}
+        harvest_api_url = HARVEST_BASE_URL + "/projects/"+str(project_id)
+        response = requests.patch(
+            url=harvest_api_url,
+            data=project_data,
+            headers=HARVEST_HEADERS
+            )
+        print(json.dumps(json.loads(response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(response.text)
+        return json_response
+
+    def get_project_id_by_code(self, project_code):
+        # Get Harvest Project ID by project code
+        if project_code is None:
+            print('Project Code is not defined!')
+        else:
+            project_code = project_code.strip()
+            for pageno in range(HARVEST_PROJECT_PAGES):
+                pageno += 1
+                json_response = self.get_project_list(pageno)
+
+                # Filter the Harvest Project Codes related to Client Name
+                for project in json_response['projects']:
+                    if project_code == project['code']:
+                        project_id = project['id']
+                        return project_id
+
+
+class Slack(object):
+# Slack Class
+
+    def generate_channel_name(self, channel_full_name):
+        # Generate Slack channel name
+        slack_channel_name = channel_full_name.strip()
+        slack_channel_name = slack_channel_name.replace(" ", "")
+        slack_channel_name = slack_channel_name[:20]
+        slack_channel_name = slack_channel_name.lower()
+        return slack_channel_name
+
+    def set_channel_purpose(self, slack_channel_json_response, slack_channel_purpose):
+        # Set the slack channel purpose
+        slack_channel_id = slack_channel_json_response["channel"]["id"]
+        # Update the channel purpose description
+        slack_url = SLACK_BASE_URL+"/channels.setPurpose"
+        slack_jsondata = {
+            'channel': slack_channel_id,
+            'purpose': slack_channel_purpose
+            }
+        slack_channel_purpose_response =\
+            requests.post(slack_url, json=slack_jsondata, headers=SLACK_HEADERS)
+        print(json.dumps(
+            json.loads(slack_channel_purpose_response.text),
+            sort_keys=True, indent=4, separators=(",", ": ")
+            ))
+
+    def create_channel(self, channel_full_name):
+        # Create Slack channel
+        slack_channel_name = self.generate_channel_name(channel_full_name)
+        slack_url = SLACK_BASE_URL+"/channels.create"
+        slack_jsondata = {
+            'name': slack_channel_name
+            }
+        slack_channel_response = \
+            requests.post(slack_url, json=slack_jsondata, headers=SLACK_HEADERS)
+        print(json.dumps(
+            json.loads(slack_channel_response.text),
+            sort_keys=True, indent=4, separators=(",", ": ")
+            ))
+        slack_channel_json_response = json.loads(slack_channel_response.text)
+        slack_response_status = slack_channel_json_response["ok"]
+        if slack_response_status:
+            slack_channel_id = slack_channel_json_response["channel"]["id"]
+            # Update the channel purpose description
+            self.set_channel_purpose(slack_channel_json_response, channel_full_name)
+            return slack_channel_id
+        else:
+            print(slack_channel_json_response)
+
+    def get_user_ids(self):
+        # Slack API - Get Slack user ID
+        slack_url = SLACK_BASE_URL+"/users.list"
+        slack_jsondata = {
+            'limit': SLACK_FILTER_USER_COUNT
+            }
+        slack_response = \
+            requests.post(
+                url=slack_url,
+                json=slack_jsondata,
+                headers=SLACK_HEADERS
+                )
+        # print(json.dumps(json.loads(slack_response.text),sort_keys=True, indent=4, separators=(",", ": ")))
+        slack_channel_emails = SLACK_CHANNEL_DEFAULT_EMAILS
+        slack_json_response = json.loads(slack_response.text)
+        # print(slack_json_response)
+        slack_members = slack_json_response["members"]
+        slack_channel_member_ids = []
+        for slack_profile in slack_members:
+            slack_user_id = slack_profile["id"]
+            # print(slack_profile["profile"].get("email"))
+            slack_channel_member_email = slack_profile["profile"].get("email")
+            if slack_channel_member_email != "None":
+                # Map with the Harvest Emails
+                for harvest_user_email in slack_channel_emails:
+                    if harvest_user_email == slack_channel_member_email:
+                        slack_channel_member_ids.append(slack_user_id)
+
+        return slack_channel_member_ids
+
+    def set_user_ids_to_channel(self, slack_channel_id, slack_user_ids):
+        # Assigned Slack users to the created channel
+        slack_url = SLACK_BASE_URL+"/channels.invite"
+        for slack_member_id in slack_user_ids:
+            # print(slack_member_id)
+            slack_jsondata = {
+                'channel': slack_channel_id,
+                'user': slack_member_id
+                }
+            slack_response = \
+                requests.post(
+                    slack_url,
+                    json=slack_jsondata,
+                    headers=SLACK_HEADERS
+                    )
+            slack_response_json_load = json.loads(slack_response.text)
+            slack_response_json_dump = json.dumps(
+                slack_response_json_load,
+                sort_keys=True, indent=4, separators=(",", ": ")
+                )
+            print(slack_response_json_dump)
+            # output = [{'response': print(slack_response_json_dump)}]
+
+    def get_channel_list(self):
+        # Get all the slack channel list
+        # Require channels:read permission to Slack App
+        slack_url = SLACK_BASE_URL+"/channels.list"
+        slack_response = requests.get(
+            url=slack_url,
+            headers=SLACK_HEADERS
+            )
+        # print(json.dumps(json.loads(slack_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(slack_response.text)
+        return json_response
+
+    def filter_channel_id_by_name(self, channel_name):
+        # Get the slack channel id by its name
+        channel_list = self.get_channel_list()
+        for channel in channel_list['channels']:
+            slack_channel_name = channel['name']
+            # print(channel_name)
+            if slack_channel_name == channel_name:
+                slack_channel_id = channel['id']
+                return slack_channel_id
+
+    def set_channel_archive(self, channel_id):
+        # Set Slack channel archive
+        # channels:write permission required to Slack App
+        slack_url = SLACK_BASE_URL+"/channels.archive"
+        json_data = {'channel': channel_id}
+        slack_response = requests.post(
+            url=slack_url,
+            json=json_data,
+            headers=SLACK_HEADERS
+            )
+        print(json.dumps(json.loads(slack_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(slack_response.text)
+        return json_response
+
+
+class Float(object):
+# Float Class
+
+    def get_projects(self):
+        # Get Float Projects
+        float_url = FLOAT_BASE_URL+"/projects"
+        float_response = requests.get(
+            url=float_url,
+            headers=FLOAT_HEADERS
+            )
+        print(json.dumps(json.loads(float_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(float_response.text)
+        return json_response
+
+    def update_project_details(self, project_id, project_data):
+        # Update Float Project details
+        # project_data sample data
+        # {"name":"New project name"}
+        float_url = FLOAT_BASE_URL + "/projects/"+str(project_id)
+        float_response = requests.patch(
+            url=float_url,
+            json=project_data,
+            headers=FLOAT_HEADERS
+            )
+        print(json.dumps(json.loads(float_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(float_response.text)
+        return json_response
+
+    def get_project_id_by_name(self, project_name):
+        # Get Float project ID by its name
+        float_projects = self.get_projects()
+        for project in float_projects:
+            if project_name == project['name']:
+                return project['project_id']
+
+    def get_people(self):
+        # Get Float People
+        float_url = FLOAT_BASE_URL+"/people"
+        float_response = requests.get(
+            url=float_url,
+            headers=FLOAT_HEADERS
+            )
+        # print(json.dumps(json.loads(float_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(float_response.text)
+        return json_response
+
+    def get_clients(self):
+        # Get Float Clients
+        float_url = FLOAT_BASE_URL+"/clients"
+        float_response = requests.get(
+            url=float_url,
+            headers=FLOAT_HEADERS
+            )
+        # print(json.dumps(json.loads(float_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(float_response.text)
+        return json_response
+
+    def create_client(self, client_name):
+        # Create Float Client
+        float_url = FLOAT_BASE_URL+"/clients"
+        json_data = {'name': ''+client_name+''}
+        float_response = requests.post(
+            url=float_url,
+            json=json_data,
+            headers=FLOAT_HEADERS
+            )
+        print(json.dumps(json.loads(float_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+        json_response = json.loads(float_response.text)
+        return json_response
+
+    def get_client_id_by_name(self, client_name):
+        # Get Float Client ID by Client Name
+        float_clients = self.get_clients()
+        for client in float_clients:
+            if client_name == client['name']:
+                return client['client_id']
+
+
+# ================================
+# Process Objectives
+# ================================
+JIRAOBJ = JIRA()
+HARVESTOBJ = Harvest()
+SLACKOBJ = Slack()
+FLOATOBJ = Float()
+CONFLUENCEOBJ = Confluence()
+# ================================
+# Objective: Get all the JIRA Clients & Contacts data
+# ================================
+# Get JIRA Clients data
+JQL_DATA = json.dumps({
+  "expand": [
+    "names",
+    "schema"
+  ],
+  "jql": "issuetype = Client AND status != Closed",
+  "maxResults": 100,
+  "fieldsByKeys": "false",
+  "fields": [
+    "issuelinks",
+    "description",
+    "issuetype",
+    "issuetype",
+    "status",
+    "summary"
+  ],
+  "startAt": 0
+})
+JIRA_CLIENTS_JSON_DATA = JIRAOBJ.search_issue(JQL_DATA)
+PAGE_DATA = JIRAOBJ.filter_client_contact_details(JIRA_CLIENTS_JSON_DATA)
+# ================================
+# Objective: Create or update Confluence article Client page with their Contacts 
+# ================================
+# Create a Confluence Client Contact article page
+CONFLUENCEOBJ.create_client_contact_page(PAGE_DATA, CONFLUENCE_PAGE_SPACE_KEY)
+
+output = [{'response': 'true'}]
