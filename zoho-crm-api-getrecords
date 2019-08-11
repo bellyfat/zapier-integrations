@@ -1,0 +1,15 @@
+import json
+import requests
+
+# API methods - https://www.zoho.com/crm/developer/docs/api/api-methods.html
+# getrecords API Call
+module_name = 'Deals'
+authtoken = '*****'
+api_url = "https://crm.zoho.com/crm/private/json/"+module_name+"/getRecords?authtoken="+authtoken+"&scope=crmapi&fromIndex=1&toIndex=2"
+
+# GET Request
+request_response = requests.get(
+    url=api_url
+    )
+print(json.dumps(json.loads(request_response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+json_response = json.loads(request_response.text)
